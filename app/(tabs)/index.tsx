@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx (已整合按鈕音效)
+// app/(tabs)/index.tsx (已更新：沉浸式文案)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,18 +16,25 @@ import GameLoop from '@/components/GameLoop';
 import LoadingScreen from '@/components/LoadingScreen';
 import { GameSettings, useGemini } from '@/hooks/useGemini';
 import { useImageSearch } from '@/hooks/useImageSearch';
-import { useMenuSounds } from '@/hooks/useMenuSounds'; // <-- 1. 匯入音效 Hook
+import { useMenuSounds } from '@/hooks/useMenuSounds';
 
 // --- 遊戲設定 (類型和常數) ---
 type GameLength = 'short' | 'medium' | 'long';
 const TURN_MAP: Record<GameLength, number> = {
-  short: 10,
+  short: 2,
   medium: 20,
   long: 35,
 };
 const API_KEY_STORAGE_KEY = '@gemini_api_key';
-const TOTAL_TALENT_POINTS = 10;
+const TOTAL_TALENT_POINTS = 20; 
 type Attribute = 'rootBone' | 'insight' | 'luck' | 'background';
+
+const ATTRIBUTE_DESCRIPTIONS: Record<Attribute, string> = {
+  rootBone: "【根骨】：決定你的修練速度、體質強弱，以及對抗物理傷害的能力。根骨高者，百病不侵，修為一日千里。",
+  insight: "【悟性】：決定你領悟功法、突破瓶頸的機率。悟性高者，能從萬物中參透大道，學習法術事半功倍。",
+  luck: "【氣運】：決定你遇到奇遇、獲得寶物以及逃脫死劫的運氣。氣運高者，走路都能踢到靈石，絕處亦能逢生。",
+  background: "【家世】：決定你的開局資源、人脈關係以及初始社會地位。家世顯赫者，起步即有神兵靈藥相助，少走許多彎路。",
+};
 
 const UNSPLASH_ACCESS_KEY = process.env.EXPO_PUBLIC_UNSPLASH_KEY || '';
 
@@ -44,6 +51,10 @@ export default function AppEntry() {
     background: 0,
   });
 
+  console.log("Key check:", process.env.EXPO_PUBLIC_UNSPLASH_KEY);
+
+  const [activeAttribute, setActiveAttribute] = useState<Attribute | null>(null);
+
   const remainingPoints =
     TOTAL_TALENT_POINTS -
     attributes.rootBone -
@@ -59,6 +70,8 @@ export default function AppEntry() {
     startGame,
     resetGame: resetGeminiGame,
     sendChoice,
+    currentTurn,
+    maxTurns,
   } = useGemini(apiKey);
 
   const {
@@ -69,7 +82,6 @@ export default function AppEntry() {
     resetImage,
   } = useImageSearch(UNSPLASH_ACCESS_KEY);
 
-  // 2. 呼叫音效 Hook
   const { playButton1, playButton2, playButton3 } = useMenuSounds();
 
   // --- useEffect 載入 Key ---
@@ -90,41 +102,42 @@ export default function AppEntry() {
   }, []);
 
   const handleResetGame = () => {
-    playButton3(); // 重新開始也算大按鈕，播放 button3
+    playButton3();
     resetGeminiGame();
     resetImage();
   };
 
-  // --- 天賦點邏輯 (綁定音效) ---
+  // --- 天賦點邏輯 ---
   const handleIncrement = (attr: Attribute) => {
+    setActiveAttribute(attr); 
     if (remainingPoints > 0) {
-      playButton2(); // <-- 音效 2
+      playButton2();
       setAttributes(prev => ({ ...prev, [attr]: prev[attr] + 1 }));
     }
   };
   const handleDecrement = (attr: Attribute) => {
+    setActiveAttribute(attr); 
     if (attributes[attr] > 0) {
-      playButton2(); // <-- 音效 2
+      playButton2();
       setAttributes(prev => ({ ...prev, [attr]: prev[attr] - 1 }));
     }
   };
-
-  // --- 篇長選擇邏輯 (綁定音效) ---
+  
   const handleSetGameLength = (len: GameLength) => {
-    playButton1(); // <-- 音效 1
+    playButton1();
     setGameLength(len);
   };
 
-  // --- handleStartGame (綁定音效) ---
+  // --- handleStartGame ---
   const handleStartGame = async () => {
-    playButton3(); // <-- 音效 3 (開始遊戲)
-    
+    playButton3();
     if (!apiKey.trim()) {
-      alert('請輸入您的 Gemini API Key');
+      // 【文案修改】
+      alert('請輸入天道密鑰方可開啟輪迴。');
       return;
     }
     if (remainingPoints !== 0) {
-      alert(`您還有 ${remainingPoints} 點天賦點尚未分配！`);
+      alert(`尚有 ${remainingPoints} 點先天命數未分配！`);
       return;
     }
     try {
@@ -175,6 +188,8 @@ export default function AppEntry() {
           onReset={handleResetGame}
           onSearchImage={searchImage}
           endingImageUrl={imageUrl}
+          currentTurn={currentTurn}
+          maxTurns={maxTurns}
         />
       </SafeAreaView>
     );
@@ -187,22 +202,22 @@ export default function AppEntry() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.title}>轉生修仙錄</Text>
         
-        <Text style={styles.label}>請輸入您的 Gemini API Key</Text>
+        {/* 【文案修改】 */}
+        <Text style={styles.label}>請輸入您的天道密鑰</Text>
         <TextInput
           style={styles.input}
-          placeholder="貼上您的 API Key..."
+          placeholder="在此注入密鑰 (Gemini API Key)..."
           placeholderTextColor="#555"
           value={apiKey}
           onChangeText={setApiKey}
           secureTextEntry
         />
 
-        <Text style={styles.label}>選擇篇章長度</Text>
+        <Text style={styles.label}>選擇輪迴長度</Text>
         <View style={styles.buttonGroup}>
           {(['short', 'medium', 'long'] as GameLength[]).map((len) => (
             <Pressable
               key={len}
-              // 更新：使用新的 handleSetGameLength (含音效)
               onPress={() => handleSetGameLength(len)}
               style={({ pressed }) => [
                 styles.pressableButton,
@@ -223,7 +238,7 @@ export default function AppEntry() {
         </View>
 
         <Text style={styles.label}>
-          分配天賦 (剩餘點數: {remainingPoints})
+          先天命格 (剩餘點數: {remainingPoints})
         </Text>
         <View style={styles.talentContainer}>
           <TalentRow 
@@ -231,33 +246,52 @@ export default function AppEntry() {
             value={attributes.rootBone}
             onDecrement={() => handleDecrement('rootBone')}
             onIncrement={() => handleIncrement('rootBone')}
+            onLabelPress={() => setActiveAttribute('rootBone')}
             decrementDisabled={attributes.rootBone === 0}
             incrementDisabled={remainingPoints === 0}
+            isActive={activeAttribute === 'rootBone'} 
           />
           <TalentRow 
             label="悟性"
             value={attributes.insight}
             onDecrement={() => handleDecrement('insight')}
             onIncrement={() => handleIncrement('insight')}
+            onLabelPress={() => setActiveAttribute('insight')}
             decrementDisabled={attributes.insight === 0}
             incrementDisabled={remainingPoints === 0}
+            isActive={activeAttribute === 'insight'}
           />
           <TalentRow 
             label="氣運"
             value={attributes.luck}
             onDecrement={() => handleDecrement('luck')}
             onIncrement={() => handleIncrement('luck')}
+            onLabelPress={() => setActiveAttribute('luck')}
             decrementDisabled={attributes.luck === 0}
             incrementDisabled={remainingPoints === 0}
+            isActive={activeAttribute === 'luck'}
           />
           <TalentRow 
             label="家世"
             value={attributes.background}
             onDecrement={() => handleDecrement('background')}
             onIncrement={() => handleIncrement('background')}
+            onLabelPress={() => setActiveAttribute('background')}
             decrementDisabled={attributes.background === 0}
             incrementDisabled={remainingPoints === 0}
+            isActive={activeAttribute === 'background'}
           />
+        </View>
+
+        <View style={styles.descriptionBox}>
+          <Text style={styles.descriptionTitle}>
+            {activeAttribute ? "命格說明" : "天道提示"}
+          </Text>
+          <Text style={styles.descriptionContent}>
+            {activeAttribute 
+              ? ATTRIBUTE_DESCRIPTIONS[activeAttribute] 
+              : "請點擊上方命格名稱，查看各項天賦的詳細因果。"}
+          </Text>
         </View>
 
         <Pressable
@@ -283,16 +317,15 @@ export default function AppEntry() {
 }
 
 // --- 輔助元件與樣式保持不變 ---
-// (為了節省篇幅，下方的 TalentRow 和 styles 沿用上一版即可，內容無需更動)
-// ... 
-// ... 
 interface TalentRowProps {
   label: string;
   value: number;
   onIncrement: () => void;
   onDecrement: () => void;
+  onLabelPress: () => void; 
   incrementDisabled: boolean;
   decrementDisabled: boolean;
+  isActive: boolean; 
 }
 
 const TalentRow = ({ 
@@ -300,12 +333,19 @@ const TalentRow = ({
   value, 
   onIncrement, 
   onDecrement,
+  onLabelPress,
   incrementDisabled,
-  decrementDisabled 
+  decrementDisabled,
+  isActive
 }: TalentRowProps) => {
   return (
-    <View style={styles.talentRow}>
-      <Text style={styles.talentLabel}>{label}</Text>
+    <View style={[styles.talentRow, isActive && styles.talentRowActive]}>
+      <Pressable onPress={onLabelPress}>
+        <Text style={[styles.talentLabel, isActive && styles.talentLabelActive]}>
+          {label}
+        </Text>
+      </Pressable>
+      
       <View style={styles.talentControls}>
         <Pressable 
           onPress={onDecrement} 
@@ -434,10 +474,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
+  talentRowActive: {
+    backgroundColor: '#111', 
+    paddingHorizontal: 5, 
+    borderRadius: 5,
+  },
   talentLabel: {
     color: '#FFF',
     fontSize: 18,
     fontFamily: 'NotoSerifTC_400Regular', 
+  },
+  talentLabelActive: {
+    color: '#00FFFF', 
+    fontFamily: 'NotoSerifTC_700Bold',
   },
   talentControls: {
     flexDirection: 'row',
@@ -467,5 +516,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     width: 40,
     textAlign: 'center',
+  },
+  descriptionBox: {
+    width: '90%',
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#444',
+    borderRadius: 5,
+    minHeight: 80, 
+  },
+  descriptionTitle: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 5,
+    fontFamily: 'NotoSerifTC_400Regular',
+  },
+  descriptionContent: {
+    color: '#E0E0E0',
+    fontSize: 15,
+    lineHeight: 22,
+    fontFamily: 'NotoSerifTC_400Regular',
   },
 });

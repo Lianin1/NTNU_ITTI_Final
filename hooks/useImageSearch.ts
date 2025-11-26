@@ -1,24 +1,34 @@
-// hooks/useImageSearch.ts
+// hooks/useImageSearch.ts (已修復：加入找不到圖片時的備用機制)
 import { useState } from 'react';
 
-// Unsplash API 的端點
 const API_ENDPOINT = 'https://api.unsplash.com/search/photos';
 
-/**
- * 處理 Unsplash 圖片搜尋的 Hook
- * @param apiKey - 您的 Unsplash Access Key
- */
 export const useImageSearch = (apiKey: string) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
-  // imageUrl 將儲存一個 'https://images.unsplash.com/...' 格式的 URL
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
-  /**
-   * 呼叫 API，搜尋符合關鍵字的圖片
-   * @param keyword - 來自 Gemini 結局的關鍵字
-   */
+  // 內部搜尋函式，可重複使用
+  const performSearch = async (query: string): Promise<string | null> => {
+    // 強制黑白 + 高品質過濾
+    const url = `${API_ENDPOINT}?query=${encodeURIComponent(
+      query
+    )}&per_page=1&orientation=landscape&color=black_and_white&content_filter=high`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Client-ID ${apiKey}` },
+    });
+
+    if (!response.ok) throw new Error(`Unsplash Error: ${response.status}`);
+
+    const data = await response.json();
+    if (data.results && data.results.length > 0) {
+      return data.results[0].urls.regular;
+    }
+    return null; // 沒找到
+  };
+
   const searchImage = async (keyword: string) => {
     if (!apiKey) {
       setError('Unsplash API Key 尚未設定');
@@ -29,50 +39,32 @@ export const useImageSearch = (apiKey: string) => {
     setError(null);
     setImageUrl(null);
 
-    // 1. 準備 API 請求 URL
-    const url = `${API_ENDPOINT}?query=${encodeURIComponent(
-      keyword
-    )}&per_page=1&orientation=landscape`;
-
     try {
-      // 2. 發送 fetch 請求
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          // Unsplash 使用 "Authorization"
-          Authorization: `Client-ID ${apiKey}`,
-        },
-      });
+      // 1. 嘗試使用 AI 給的關鍵字
+      let url = await performSearch(keyword);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Unsplash API 錯誤: ${response.status} ${errorText}`);
+      // 2. 【⭐ 修正點】如果找不到，使用備用關鍵字重試
+      if (!url) {
+        console.warn(`Unsplash 找不到 "${keyword}"，嘗試使用備用關鍵字...`);
+        // 使用一個很穩的通用關鍵字
+        url = await performSearch('fantasy mystery landscape mist'); 
       }
 
-      // 3. 處理回傳的 JSON 資料
-      const data = await response.json();
-
-      if (data.results && data.results.length > 0) {
-        // 4. 取得第一張圖片的 URL
-        // 我們使用 'regular' 尺寸，它大小適中
-        const firstImage = data.results[0];
-        setImageUrl(firstImage.urls.regular);
+      // 3. 設定圖片 (如果兩次都失敗，url 仍可能為 null，但機率極低)
+      if (url) {
+        setImageUrl(url);
       } else {
-        // 如果 Unsplash 找不到任何圖片
-        throw new Error(`找不到符合 "${keyword}" 的圖片`);
+        throw new Error('無法找到任何相關圖片');
       }
 
     } catch (e: any) {
       console.error('圖片搜尋失敗:', e);
-      setError(e.message || '搜尋圖片時發生未知錯誤');
+      setError('無法載入天機圖像'); // 給使用者看的友善訊息
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * 重設狀態 (用於新遊戲)
-   */
   const resetImage = () => {
     setIsLoading(false);
     setError(null);
@@ -83,7 +75,7 @@ export const useImageSearch = (apiKey: string) => {
     isImageLoading: isLoading,
     imageError: error,
     imageUrl,
-    searchImage, // 匯出 searchImage
+    searchImage,
     resetImage,
   };
 };

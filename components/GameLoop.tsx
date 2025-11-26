@@ -1,6 +1,6 @@
-// components/GameLoop.tsx (已修復無限迴圈 Bug)
+// components/GameLoop.tsx (已新增回合數顯示 UI)
 import { Audio } from 'expo-av';
-import React, { useCallback, useEffect, useRef, useState } from 'react'; // 1. 匯入 useCallback
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -22,6 +22,9 @@ interface GameLoopProps {
   onReset: () => void;
   onSearchImage: (keyword: string) => void;
   endingImageUrl: string | null;
+  // 【新增 Props】
+  currentTurn: number;
+  maxTurns: number;
 }
 
 const SOUND_PLAYBACK_RATE = 3; 
@@ -31,7 +34,9 @@ export default function GameLoop({
   onChoice, 
   onReset,
   onSearchImage,
-  endingImageUrl
+  endingImageUrl,
+  currentTurn, // 接收
+  maxTurns,    // 接收
 }: GameLoopProps) {
   
   const isGameEnded = scene.game_state === 'ended';
@@ -40,11 +45,10 @@ export default function GameLoop({
   const [systemSound, setSystemSound] = useState<Audio.Sound | null>(null);
   
   const descriptionCharCounter = useRef(0);
-
   const [areOptionsVisible, setAreOptionsVisible] = useState(false);
   const optionsOpacity = useRef(new Animated.Value(0)).current;
 
-  // 載入音效
+  // 1. 載入音效
   useEffect(() => {
     let descSound: Audio.Sound | null = null;
     let sysSound: Audio.Sound | null = null;
@@ -83,15 +87,12 @@ export default function GameLoop({
     };
   }, []);
 
-  // 重設狀態
   useEffect(() => {
     descriptionCharCounter.current = 0;
     setAreOptionsVisible(false);
     optionsOpacity.setValue(0);
   }, [scene.scene_description]); 
 
-  // --- 【⭐ 修正點：使用 useCallback】 ---
-  // 這樣可以確保函式記憶體位置不變，避免 useTypewriter 誤判重置
   const playDescriptionSound = useCallback(() => {
     if (descriptionSound) {
       descriptionCharCounter.current += 1;
@@ -99,13 +100,7 @@ export default function GameLoop({
         try { descriptionSound.playFromPositionAsync(0).catch(() => {}); } catch (e) {}
       }
     }
-  }, [descriptionSound]); // 只有當 descriptionSound 改變時才更新函式
-
-  // 雖然系統音效不是打字機用的，但保持一致性也好
-  const playSystemSound = useCallback(() => {
-    // 這裡其實用不到，因為我們現在是手動播放，但為了未來擴充保留
-  }, [systemSound]);
-  // --------------------------------------
+  }, [descriptionSound]);
 
   const { 
     displayedText: displayedDescription, 
@@ -116,51 +111,69 @@ export default function GameLoop({
     playDescriptionSound 
   );
 
-  // 系統音效 與 選項延遲顯示
   useEffect(() => {
     if (isDescriptionFinished) {
-      
       if (scene.system_message && systemSound) {
         try { systemSound.playFromPositionAsync(0).catch(() => {}); } catch (e) {}
       }
-
       const timer = setTimeout(() => {
         setAreOptionsVisible(true); 
-        
         Animated.timing(optionsOpacity, {
           toValue: 1,
           duration: 800,
           easing: Easing.out(Easing.ease),
           useNativeDriver: true, 
         }).start();
-
       }, 800); 
-
       return () => clearTimeout(timer);
     }
   }, [isDescriptionFinished, scene.system_message, systemSound]);
 
-  // 圖片搜尋
   useEffect(() => {
     if (isGameEnded && !endingImageUrl && scene.ending_keyword) {
       onSearchImage(scene.ending_keyword);
     }
   }, [isGameEnded, endingImageUrl, onSearchImage, scene.ending_keyword]);
 
-  // --- Return JSX ---
+  // 計算回合進度百分比 (用於顯示進度條)
+  const progressPercent = Math.min((currentTurn / maxTurns) * 100, 100);
+
+  const tags = scene.scene_tags || ["", "", "", ""]; 
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       
-      {/* Scene Art */}
-      {scene.scene_art && scene.scene_art.length > 0 && (
-        <View style={styles.artContainer}>
-          {scene.scene_art.map((line, index) => (
-            <Text key={index} style={styles.artText}>
-              {line}
-            </Text>
-          ))}
+      {/* --- 【新功能】回合數顯示器 (HUD) --- */}
+      <View style={styles.hudContainer}>
+        <Text style={styles.turnText}>
+          回合 {currentTurn} <Text style={styles.turnMaxText}>/ {maxTurns}</Text>
+        </Text>
+        {/* 小小的回合進度條 */}
+        <View style={styles.turnProgressBar}>
+          <View style={[styles.turnProgressFill, { width: `${progressPercent}%` }]} />
         </View>
-      )}
+      </View>
+      {/* ---------------------------------- */}
+
+      {/* 文字地景 UI */}
+      <View style={styles.artContainer}>
+        <View style={styles.cornerTL}>
+          <Text style={styles.tagText}>{tags[0]}</Text>
+        </View>
+        <View style={styles.cornerTR}>
+          <Text style={styles.tagText}>{tags[1]}</Text>
+        </View>
+        <View style={styles.centerContent}>
+          <Text style={styles.sceneTitle}>{scene.scene_title}</Text>
+          <View style={styles.divider} />
+        </View>
+        <View style={styles.cornerBL}>
+          <Text style={styles.tagText}>{tags[2]}</Text>
+        </View>
+        <View style={styles.cornerBR}>
+          <Text style={styles.tagText}>{tags[3]}</Text>
+        </View>
+      </View>
 
       {/* 劇情描述 */}
       <Text style={[
@@ -243,7 +256,6 @@ export default function GameLoop({
   );
 }
 
-// --- 樣式表 (保持不變) ---
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -252,11 +264,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 15,
   },
+  
+  // --- 【新增樣式】HUD 回合顯示 ---
+  hudContainer: {
+    width: '100%',
+    marginBottom: 15, // 與場景框保持距離
+    alignItems: 'flex-end', // 靠右對齊，比較不干擾閱讀
+  },
+  turnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontFamily: 'NotoSerifTC_400Regular',
+    marginBottom: 5,
+  },
+  turnMaxText: {
+    color: '#666', // 總回合數顏色淡一點
+  },
+  turnProgressBar: {
+    width: '100%',
+    height: 2, // 很細的線條
+    backgroundColor: '#222',
+    borderRadius: 1,
+  },
+  turnProgressFill: {
+    height: '100%',
+    backgroundColor: '#00FFFF', // 青色進度
+  },
+  // -----------------------------
+
   artContainer: {
     backgroundColor: '#0a0a0a',
-    padding: 20,
     borderRadius: 8,
     width: '100%',
+    height: 180, 
     marginBottom: 20,
     borderWidth: 1,
     borderColor: '#333',
@@ -264,14 +304,36 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  artText: {
+  centerContent: {
+    alignItems: 'center',
+  },
+  sceneTitle: {
     color: '#E0E0E0',
-    fontSize: 16,
-    fontFamily: 'monospace',
-    lineHeight: 22,
+    fontSize: 32,
+    fontFamily: 'NotoSerifTC_700Bold', 
+    letterSpacing: 4, 
     textAlign: 'center',
   },
+  divider: {
+    width: 40,
+    height: 2,
+    backgroundColor: '#555',
+    marginTop: 10,
+  },
+  tagText: {
+    color: '#888',
+    fontSize: 14,
+    fontFamily: 'NotoSerifTC_400Regular',
+  },
+  cornerTL: { position: 'absolute', top: 15, left: 20 },
+  cornerTR: { position: 'absolute', top: 15, right: 20 },
+  cornerBL: { position: 'absolute', bottom: 15, left: 20 },
+  cornerBR: { position: 'absolute', bottom: 15, right: 20 },
+
   descriptionText: {
     color: '#FFF',
     fontSize: 20,
