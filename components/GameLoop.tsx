@@ -1,4 +1,5 @@
-// components/GameLoop.tsx (已優化：動畫順序 + 圖片灰階)
+// components/GameLoop.tsx (已更新：使用自定義退出視窗)
+import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -10,9 +11,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
 } from 'react-native';
 
+import ExitModal from '@/components/ExitModal'; // 1. 匯入新元件
 import { SceneData } from '@/hooks/useGemini';
 import { useTypewriter } from '@/hooks/useTypewriter';
 
@@ -42,20 +44,21 @@ export default function GameLoop({
 
   const [descriptionSound, setDescriptionSound] = useState<Audio.Sound | null>(null);
   const [systemSound, setSystemSound] = useState<Audio.Sound | null>(null);
+  const [buttonSound, setButtonSound] = useState<Audio.Sound | null>(null); 
   
   const descriptionCharCounter = useRef(0);
-
-  // 動畫控制狀態
   const [areOptionsVisible, setAreOptionsVisible] = useState(false);
-  
-  // 兩個獨立的透明度動畫值
   const optionsOpacity = useRef(new Animated.Value(0)).current;
-  const imageOpacity = useRef(new Animated.Value(0)).current; // 【新增】圖片透明度
+  const imageOpacity = useRef(new Animated.Value(0)).current;
+
+  // 2. 新增 Modal 可見度狀態
+  const [isExitModalVisible, setIsExitModalVisible] = useState(false);
 
   // 1. 載入音效
   useEffect(() => {
     let descSound: Audio.Sound | null = null;
     let sysSound: Audio.Sound | null = null;
+    let btnSound: Audio.Sound | null = null;
     let isMounted = true;
     
     async function loadSounds() {
@@ -77,6 +80,15 @@ export default function GameLoop({
           sysSound = newSysSound;
           setSystemSound(newSysSound);
         } else { newSysSound.unloadAsync().catch(() => {}); }
+
+        const { sound: newBtnSound } = await Audio.Sound.createAsync(
+           require('@/assets/sounds/button3.wav'), 
+           { shouldPlay: false }
+        );
+        if (isMounted) {
+          btnSound = newBtnSound;
+          setButtonSound(newBtnSound);
+        } else { newBtnSound.unloadAsync().catch(() => {}); }
         
       } catch (error) {
         console.error('Failed to load sounds', error);
@@ -88,16 +100,15 @@ export default function GameLoop({
       isMounted = false;
       if (descSound) descSound.unloadAsync().catch(() => {}); 
       if (sysSound) sysSound.unloadAsync().catch(() => {});
+      if (btnSound) btnSound.unloadAsync().catch(() => {});
     };
   }, []);
 
-  // 重設狀態
   useEffect(() => {
     descriptionCharCounter.current = 0;
-    
     setAreOptionsVisible(false);
     optionsOpacity.setValue(0);
-    imageOpacity.setValue(0); // 重設圖片透明度
+    imageOpacity.setValue(0);
   }, [scene.scene_description]); 
 
   const playDescriptionSound = useCallback(() => {
@@ -109,34 +120,55 @@ export default function GameLoop({
     }
   }, [descriptionSound]);
 
+  const playButtonSound = () => {
+    if (buttonSound) {
+      try { buttonSound.replayAsync().catch(() => {}); } catch (e) {}
+    }
+  };
+
   const { 
     displayedText: displayedDescription, 
-    isFinished: isDescriptionFinished 
+    isFinished: isDescriptionFinished,
+    skip: skipDescription 
   } = useTypewriter(
     scene.scene_description, 
     50, 
     playDescriptionSound 
   );
 
-  // --- 【核心動畫邏輯修正】 ---
+  const handleSkip = () => {
+    if (!isDescriptionFinished) {
+      skipDescription();
+    }
+  };
+
+  // 【⭐ 修改：打開 Modal】
+  const handleExit = () => {
+    playButtonSound();
+    setIsExitModalVisible(true);
+  };
+
+  // 【⭐ 新增：處理確認退出】
+  const handleConfirmExit = () => {
+    playButtonSound();
+    setIsExitModalVisible(false); // 關閉視窗
+    onReset(); // 執行重置
+  };
+
   useEffect(() => {
     if (isDescriptionFinished) {
-      // 1. 播放系統音效
       if (scene.system_message && systemSound) {
         try { systemSound.playFromPositionAsync(0).catch(() => {}); } catch (e) {}
       }
 
-      // 2. 如果是結局：先顯示圖片 -> 再顯示按鈕
       if (isGameEnded) {
-        // (A) 圖片淡入
         Animated.timing(imageOpacity, {
           toValue: 1,
-          duration: 1000, // 圖片慢慢浮現 (1秒)
+          duration: 1000,
           easing: Easing.out(Easing.ease),
           useNativeDriver: true,
         }).start();
 
-        // (B) 延遲 1 秒後，顯示「重新開始」按鈕
         const timer = setTimeout(() => {
           setAreOptionsVisible(true);
           Animated.timing(optionsOpacity, {
@@ -145,12 +177,10 @@ export default function GameLoop({
             easing: Easing.out(Easing.ease),
             useNativeDriver: true,
           }).start();
-        }, 1000); // 延遲 1 秒
-
+        }, 1000); 
         return () => clearTimeout(timer);
 
       } else {
-        // 3. 如果是普通回合：直接顯示選項 (延遲 0.3 秒讓節奏舒服點)
         const timer = setTimeout(() => {
           setAreOptionsVisible(true);
           Animated.timing(optionsOpacity, {
@@ -160,32 +190,38 @@ export default function GameLoop({
             useNativeDriver: true,
           }).start();
         }, 300); 
-
         return () => clearTimeout(timer);
       }
     }
   }, [isDescriptionFinished, isGameEnded, scene.system_message, systemSound]);
 
-  // 圖片搜尋
   useEffect(() => {
     if (isGameEnded && !endingImageUrl && scene.ending_keyword) {
       onSearchImage(scene.ending_keyword);
     }
   }, [isGameEnded, endingImageUrl, onSearchImage, scene.ending_keyword]);
 
+  const isAllFinished = isDescriptionFinished;
   const progressPercent = Math.min((currentTurn / maxTurns) * 100, 100);
   const tags = scene.scene_tags || ["", "", "", ""]; 
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       
-      {/* HUD */}
-      <View style={styles.hudContainer}>
-        <Text style={styles.turnText}>
-          回合 {currentTurn} <Text style={styles.turnMaxText}>/ {maxTurns}</Text>
-        </Text>
-        <View style={styles.turnProgressBar}>
-          <View style={[styles.turnProgressFill, { width: `${progressPercent}%` }]} />
+      {/* Top Bar */}
+      <View style={styles.topBar}>
+        <Pressable onPress={handleExit} style={styles.exitButton} hitSlop={15}>
+          <Ionicons name="home-outline" size={20} color="#666" />
+          <Text style={styles.exitText}> 退出</Text>
+        </Pressable>
+
+        <View style={styles.hudContainer}>
+          <Text style={styles.turnText}>
+            回合 {currentTurn} <Text style={styles.turnMaxText}>/ {maxTurns}</Text>
+          </Text>
+          <View style={styles.turnProgressBar}>
+            <View style={[styles.turnProgressFill, { width: `${progressPercent}%` }]} />
+          </View>
         </View>
       </View>
 
@@ -202,12 +238,14 @@ export default function GameLoop({
       </View>
 
       {/* 劇情描述 */}
-      <Text style={[
-        styles.descriptionText,
-        !isDescriptionFinished && styles.textAlignLeft 
-      ]}>
-        {displayedDescription}
-      </Text>
+      <Pressable onPress={handleSkip} style={styles.textContainer}>
+        <Text style={[
+          styles.descriptionText,
+          !isDescriptionFinished && styles.textAlignLeft 
+        ]}>
+          {displayedDescription}
+        </Text>
+      </Pressable>
 
       {/* 系統訊息 */}
       {isDescriptionFinished && scene.system_message && (
@@ -216,16 +254,26 @@ export default function GameLoop({
         </Text>
       )}
       
-      {/* 結局圖片 (包裹在 Animated.View 中) */}
+      {/* 跳過按鈕 */}
+      {!isAllFinished && (
+        <Pressable 
+          onPress={handleSkip} 
+          style={styles.skipButton}
+          hitSlop={20} 
+        >
+          <Text style={styles.skipButtonText}> 跳過 </Text>
+        </Pressable>
+      )}
+
+      {/* 結局圖片 */}
       {isGameEnded && (
         <Animated.View style={[
           styles.endingImageContainer,
-          { opacity: imageOpacity } // 【綁定圖片透明度】
+          { opacity: imageOpacity } 
         ]}>
           {endingImageUrl ? (
             <Image 
               source={{ uri: endingImageUrl }} 
-              // 【⭐ 重點：前端灰階濾鏡 (Web/Expo Go 支援)】
               style={[styles.endingImage, { 
                 // @ts-ignore
                 filter: 'grayscale(100%)' 
@@ -247,7 +295,7 @@ export default function GameLoop({
         </Animated.View>
       )}
 
-      {/* 選項/重新開始按鈕 */}
+      {/* 選項 */}
       {areOptionsVisible && (
         <Animated.View 
           style={[
@@ -257,7 +305,10 @@ export default function GameLoop({
         >
           {isGameEnded ? (
             <Pressable
-              onPress={onReset}
+              onPress={() => {
+                playButtonSound();
+                onReset();
+              }}
               style={({ pressed }) => [
                 styles.optionButton,
                 styles.resetButton,
@@ -272,7 +323,10 @@ export default function GameLoop({
             scene.options.map((option, index) => (
               <Pressable
                 key={index}
-                onPress={() => onChoice(option)}
+                onPress={() => {
+                  playButtonSound();
+                  onChoice(option);
+                }}
                 style={({ pressed }) => [
                   styles.optionButton,
                   pressed && { opacity: 0.8 },
@@ -284,6 +338,16 @@ export default function GameLoop({
           )}
         </Animated.View>
       )}
+
+      {/* 【⭐ 插入退出視窗元件】 */}
+      <ExitModal 
+        visible={isExitModalVisible}
+        onConfirm={handleConfirmExit}
+        onCancel={() => {
+          playButtonSound();
+          setIsExitModalVisible(false);
+        }}
+      />
 
     </ScrollView>
   );
@@ -297,9 +361,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 15,
   },
-  hudContainer: {
+  topBar: {
     width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 15,
+  },
+  exitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 5,
+  },
+  exitText: {
+    color: '#666',
+    fontFamily: 'NotoSerifTC_400Regular',
+    fontSize: 14,
+  },
+  hudContainer: {
+    width: '40%',
     alignItems: 'flex-end', 
   },
   turnText: {
@@ -363,6 +443,9 @@ const styles = StyleSheet.create({
   cornerBL: { position: 'absolute', bottom: 15, left: 20 },
   cornerBR: { position: 'absolute', bottom: 15, right: 20 },
 
+  textContainer: {
+    width: '100%',
+  },
   descriptionText: {
     color: '#FFF',
     fontSize: 20,
@@ -381,15 +464,34 @@ const styles = StyleSheet.create({
   textAlignLeft: {
     textAlign: 'left',
   },
+  
+  skipButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: 'rgba(50, 50, 50, 0.8)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#666',
+    zIndex: 10, 
+  },
+  skipButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontFamily: 'NotoSerifTC_400Regular',
+  },
+
   endingImageContainer: {
     width: '100%',
     height: 250,
-    backgroundColor: '#111', // 確保圖片載入前背景是黑的
+    backgroundColor: '#111', 
     borderRadius: 5,
     marginBottom: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden', // 確保圖片圓角
+    overflow: 'hidden', 
   },
   loadingContainer: {
     justifyContent: 'center',

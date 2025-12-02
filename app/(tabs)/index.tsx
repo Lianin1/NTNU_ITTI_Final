@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx (已更新：沉浸式文案)
+// app/(tabs)/index.tsx (已更新：加入繼續仙途按鈕)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
@@ -18,12 +18,11 @@ import { GameSettings, useGemini } from '@/hooks/useGemini';
 import { useImageSearch } from '@/hooks/useImageSearch';
 import { useMenuSounds } from '@/hooks/useMenuSounds';
 
-// --- 遊戲設定 (類型和常數) ---
 type GameLength = 'short' | 'medium' | 'long';
 const TURN_MAP: Record<GameLength, number> = {
-  short: 3,
-  medium: 35,
-  long: 50,
+  short: 2,
+  medium: 20,
+  long: 35,
 };
 const API_KEY_STORAGE_KEY = '@gemini_api_key';
 const TOTAL_TALENT_POINTS = 20; 
@@ -38,7 +37,6 @@ const ATTRIBUTE_DESCRIPTIONS: Record<Attribute, string> = {
 
 const UNSPLASH_ACCESS_KEY = process.env.EXPO_PUBLIC_UNSPLASH_KEY || '';
 
-// --- App 主元件 ---
 export default function AppEntry() {
   const [apiKey, setApiKey] = useState('');
   const [isKeyLoaded, setIsKeyLoaded] = useState(false);
@@ -51,8 +49,6 @@ export default function AppEntry() {
     background: 0,
   });
 
-  console.log("Key check:", process.env.EXPO_PUBLIC_UNSPLASH_KEY);
-
   const [activeAttribute, setActiveAttribute] = useState<Attribute | null>(null);
 
   const remainingPoints =
@@ -62,7 +58,6 @@ export default function AppEntry() {
     attributes.luck -
     attributes.background;
 
-  // --- Hook 呼叫 ---
   const {
     isLoading: isGameLoading,
     error: gameError,
@@ -72,6 +67,9 @@ export default function AppEntry() {
     sendChoice,
     currentTurn,
     maxTurns,
+    // 【⭐ 新增：接收存檔狀態】
+    hasSave,
+    continueGame,
   } = useGemini(apiKey);
 
   const {
@@ -84,7 +82,6 @@ export default function AppEntry() {
 
   const { playButton1, playButton2, playButton3 } = useMenuSounds();
 
-  // --- useEffect 載入 Key ---
   useEffect(() => {
     const loadKey = async () => {
       try {
@@ -101,13 +98,12 @@ export default function AppEntry() {
     loadKey();
   }, []);
 
-  const handleResetGame = () => {
+  const handleResetGame = async () => {
     playButton3();
     resetGeminiGame();
     resetImage();
   };
 
-  // --- 天賦點邏輯 ---
   const handleIncrement = (attr: Attribute) => {
     setActiveAttribute(attr); 
     if (remainingPoints > 0) {
@@ -128,11 +124,9 @@ export default function AppEntry() {
     setGameLength(len);
   };
 
-  // --- handleStartGame ---
   const handleStartGame = async () => {
     playButton3();
     if (!apiKey.trim()) {
-      // 【文案修改】
       alert('請輸入天道密鑰方可開啟輪迴。');
       return;
     }
@@ -152,6 +146,16 @@ export default function AppEntry() {
       maxTurns: TURN_MAP[gameLength],
     };
     await startGame(gameSettings);
+  };
+
+  // 【⭐ 新增：繼續遊戲處理函式】
+  const handleContinue = async () => {
+    playButton3();
+    if (!apiKey.trim()) {
+      alert('請輸入天道密鑰以讀取神識。');
+      return;
+    }
+    await continueGame();
   };
 
   // --- 核心渲染邏輯 ---
@@ -202,8 +206,7 @@ export default function AppEntry() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.title}>轉生修仙錄</Text>
         
-        {/* 【文案修改】 */}
-        <Text style={styles.label}>請輸入您的天道密鑰</Text>
+        <Text style={styles.label}>請輸入您的「天道密鑰」</Text>
         <TextInput
           style={styles.input}
           placeholder="在此注入密鑰 (Gemini API Key)..."
@@ -231,7 +234,7 @@ export default function AppEntry() {
                   gameLength === len && styles.pressableTextSelected,
                 ]}
               >
-                {len === 'short' ? '短篇 (20)' : (len === 'medium' ? '中篇 (35)' : '長篇 (50)')}  
+                {len === 'short' ? '短篇 (10)' : (len === 'medium' ? '中篇 (20)' : '長篇 (35)')}  
               </Text>
             </Pressable>
           ))}
@@ -294,6 +297,22 @@ export default function AppEntry() {
           </Text>
         </View>
 
+        {/* 【⭐ 新增：繼續遊戲按鈕 (如果有存檔)】 */}
+        {hasSave && (
+          <Pressable
+            onPress={handleContinue}
+            style={({ pressed }) => [
+              styles.continueButton, // 使用新樣式
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Text style={styles.continueButtonText}>
+              繼續仙途
+            </Text>
+          </Pressable>
+        )}
+
+        {/* 開始按鈕 */}
         <Pressable
           onPress={handleStartGame}
           style={({ pressed }) => [
@@ -307,7 +326,7 @@ export default function AppEntry() {
             styles.startButtonText,
             remainingPoints !== 0 && styles.startButtonTextDisabled
           ]}>
-            開始轉生
+            {hasSave ? "放棄並重新開始" : "開始轉生"} {/* 文字隨狀態改變 */}
           </Text>
         </Pressable>
 
@@ -316,7 +335,7 @@ export default function AppEntry() {
   );
 }
 
-// --- 輔助元件與樣式保持不變 ---
+// ... TalentRow (保持不變) ...
 interface TalentRowProps {
   label: string;
   value: number;
@@ -367,7 +386,9 @@ const TalentRow = ({
   );
 };
 
+// --- 樣式表 (新增了 continueButton) ---
 const styles = StyleSheet.create({
+  // ... (保留所有舊樣式)
   container: {
     flex: 1,
     backgroundColor: '#000',
@@ -425,8 +446,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     width: '90%',
   },
+  
+  // 【新樣式】繼續按鈕
+  continueButton: {
+    marginTop: 30, // 與上方說明框的距離
+    backgroundColor: '#000', // 黑底
+    borderRadius: 5,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#00FFFF', // 青色邊框，突顯重要性
+    marginBottom: 10, // 與開始按鈕的距離
+  },
+  continueButtonText: {
+    color: '#00FFFF', // 青色文字
+    fontSize: 18,
+    fontWeight: 'bold',
+    fontFamily: 'NotoSerifTC_700Bold',
+  },
+
   startButton: {
-    marginTop: 40,
+    marginTop: 10, // 縮小間距
     backgroundColor: '#FFF',
     borderRadius: 5,
     paddingVertical: 12,

@@ -1,13 +1,14 @@
-// hooks/useGemini.ts (已優化：強制全中文輸出，禁止英文內容)
+// hooks/useGemini.ts (已更新：重置遊戲時會一併刪除存檔)
 import {
   Content,
   GenerationConfig,
   GoogleGenerativeAI,
   Part,
 } from '@google/generative-ai';
-import { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
 
-// --- 1. 資料結構 ---
+// --- 資料結構 ---
 export interface SceneData {
   scene_title: string;
   scene_tags: string[];
@@ -28,7 +29,9 @@ export interface GameSettings {
   maxTurns: number;
 }
 
-// --- 2. 關鍵提示 (加入語言鐵律) ---
+const SAVE_STORAGE_KEY = '@gemini_rpg_save_data_v1';
+
+// --- 2. 關鍵提示 ---
 const SYSTEM_PROMPT: Part = {
   text: `# 角色扮演 (Persona)
 你是一個文字冒險遊戲的「遊戲管理員 (GM)」。世界觀是「轉生修仙」。
@@ -36,26 +39,23 @@ const SYSTEM_PROMPT: Part = {
 
 # 核心規則：JSON 輸出 (JSON Output)
 你【絕對必須】且【僅能】回傳一個格式化後的 JSON 物件。
-嚴禁 Markdown。
+嚴禁在 JSON 結構外輸出任何文字。
 
-你必須回傳的 JSON 結構如下：
+JSON 結構如下：
 {
-  "scene_title": "場景名稱",
+  "scene_title": "當前場景名稱 (2-5 字)",
   "scene_tags": ["標籤1", "標籤2", "標籤3", "標籤4"], 
-  "scene_description": "劇情描述...",
-  "system_message": "系統提示...",
+  "scene_description": "劇情描述 (純文字)...",
+  "system_message": "系統提示 (純文字)...",
   "options": ["選項1", "選項2", "選項3"],
   "game_state": "ongoing",
   "ending_keyword": null
 }
 
-# 語言鐵律 (Language Rules - CRITICAL)
-1.  **【全繁體中文】**：所有顯示給玩家看的欄位 (\`scene_title\`, \`scene_tags\`, \`scene_description\`, \`system_message\`, \`options\`) 必須嚴格使用【繁體中文】。
-2.  **【絕對禁止英文】**：在上述欄位中，絕不允許出現任何英文字母 (A-Z, a-z)。
-    - 錯誤範例："獲得 Spirit Stone"、"RootBone 提升"、"前往 Forest"
-    - 正確範例："獲得靈石"、"根骨提升"、"前往森林"
-3.  **【變數隱藏】**：不要顯示程式碼變數名 (如 rootBone, insight)。請轉化為自然語言，例如「你的根骨」、「你的悟性」。
-4.  **【例外】**：唯有 \`ending_keyword\` 欄位**必須**是英文 (用於搜尋圖片)。
+# 🚫 絕對禁令 (CRITICAL PROHIBITIONS) 🚫
+1.  **【禁止英文變數】**：在 \`scene_description\` 和 \`system_message\` 中，**嚴禁**出現如 \`(insight: 5)\` 等英文或數字括號！
+2.  **【禁止 Markdown 格式】**：嚴禁使用粗體、清單等 Markdown 語法。請寫成連貫的段落。
+3.  **【禁止半形符號】**：標點符號請一律使用全形。
 
 # 場景生成規則
 1.  **動態變化**：根據劇情更新 scene_title 和 scene_tags。
@@ -63,7 +63,7 @@ const SYSTEM_PROMPT: Part = {
 
 # 遊戲流程規則
 1.  回合制：嚴格遵守 \`max_turns\`。
-2.  結局：回合結束時，\`game_state\` 設為 "ended"，並提供 \`ending_keyword\`。
+2.  結局：回合結束時，\`game_state\` 設為 "ended"，並提供 \`ending_keyword\` (英文)。
 3.  屬性影響：請在劇情中體現玩家屬性的影響。
 
 # 初始任務
@@ -78,8 +78,69 @@ export const useGemini = (apiKey: string) => {
   const [currentScene, setCurrentScene] = useState<SceneData | null>(null);
   const [gameHistory, setGameHistory] = useState<Content[]>([]);
   const [turnState, setTurnState] = useState({ currentTurn: 0, maxTurns: 0 });
+  const [hasSave, setHasSave] = useState(false);
 
-  // 重試邏輯
+  useEffect(() => {
+    checkSaveExistence();
+  }, []);
+
+  useEffect(() => {
+    const saveProgress = async () => {
+      if (currentScene && gameHistory.length > 0) {
+        if (currentScene.game_state === 'ended') {
+          await AsyncStorage.removeItem(SAVE_STORAGE_KEY);
+          setHasSave(false);
+          return;
+        }
+        const saveData = {
+          currentScene,
+          gameHistory,
+          turnState,
+          timestamp: Date.now(),
+        };
+        try {
+          await AsyncStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(saveData));
+          setHasSave(true);
+        } catch (e) {
+          console.error('Auto-save failed', e);
+        }
+      }
+    };
+    saveProgress();
+  }, [currentScene, gameHistory, turnState]);
+
+  const checkSaveExistence = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(SAVE_STORAGE_KEY);
+      setHasSave(!!saved);
+    } catch (e) {
+      setHasSave(false);
+    }
+  };
+
+  const continueGame = async () => {
+    setIsLoading(true);
+    try {
+      const savedRaw = await AsyncStorage.getItem(SAVE_STORAGE_KEY);
+      if (!savedRaw) {
+        setError("找不到存檔記錄。");
+        setIsLoading(false);
+        return;
+      }
+      const savedData = JSON.parse(savedRaw);
+      setCurrentScene(savedData.currentScene);
+      setGameHistory(savedData.gameHistory);
+      setTurnState(savedData.turnState);
+    } catch (e) {
+      console.error('Load game failed', e);
+      setError('讀取存檔失敗，請重新開始。');
+      await AsyncStorage.removeItem(SAVE_STORAGE_KEY);
+      setHasSave(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> => {
     try {
       return await fn();
@@ -185,7 +246,8 @@ export const useGemini = (apiKey: string) => {
   };
 
   const startGame = async (settings: GameSettings) => {
-    resetGame();
+    // 這裡呼叫 resetGame 會確保清除舊檔
+    await resetGame();
     
     const newTurnState = { currentTurn: 0, maxTurns: settings.maxTurns };
     setTurnState(newTurnState);
@@ -195,7 +257,7 @@ export const useGemini = (apiKey: string) => {
     )}。長度設定：${JSON.stringify({
       max_turns: settings.maxTurns,
       current_turn: 0,
-    })}。請生成開局場景。`;
+    })}。請生成開局場景。注意：嚴禁 Markdown 格式，嚴禁顯示英文變數名。`;
 
     const firstUserMessage: Content = {
       role: 'user',
@@ -207,7 +269,6 @@ export const useGemini = (apiKey: string) => {
 
   const sendChoice = async (choice: string) => {
     const newTurn = turnState.currentTurn + 1;
-    
     const newTurnState = { ...turnState, currentTurn: newTurn };
     setTurnState(newTurnState);
 
@@ -232,12 +293,20 @@ export const useGemini = (apiKey: string) => {
     await runGeminiCall(gameHistory, newUserMessage, null, newTurnState);
   };
 
-  const resetGame = () => {
+  // 【⭐ 修改點：重置遊戲時，強制刪除存檔】
+  const resetGame = async () => {
     setIsLoading(false);
     setError(null);
     setCurrentScene(null);
     setGameHistory([]);
     setTurnState({ currentTurn: 0, maxTurns: 0 });
+    
+    try {
+      await AsyncStorage.removeItem(SAVE_STORAGE_KEY);
+      setHasSave(false); // 更新狀態，隱藏繼續按鈕
+    } catch (e) {
+      console.error('Failed to clear save', e);
+    }
   };
 
   return {
@@ -249,5 +318,7 @@ export const useGemini = (apiKey: string) => {
     resetGame,
     currentTurn: turnState.currentTurn,
     maxTurns: turnState.maxTurns,
+    hasSave,
+    continueGame,
   };
 };

@@ -1,4 +1,4 @@
-// hooks/useImageSearch.ts (已優化：移除黑白限制 + 強制風景風格)
+// hooks/useImageSearch.ts (已優化：隨機選圖機制)
 import { useState } from 'react';
 
 const API_ENDPOINT = 'https://api.unsplash.com/search/photos';
@@ -9,13 +9,13 @@ export const useImageSearch = (apiKey: string) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   const performSearch = async (query: string): Promise<string | null> => {
-    // 【⭐ 修改點 1】移除 &color=black_and_white
-    // 【⭐ 修改點 2】強制加上 'fantasy art landscape' 後綴，確保搜到的是場景
     const enhancedQuery = `${query} fantasy art landscape atmospheric`;
     
+    // 雖然 per_page=1 可以省流量，但為了隨機性，我們請求 10 張 (預設)
+    // 這裡設 per_page=10
     const url = `${API_ENDPOINT}?query=${encodeURIComponent(
       enhancedQuery
-    )}&per_page=1&orientation=landscape&content_filter=high`;
+    )}&per_page=10&orientation=landscape&content_filter=high`;
 
     const response = await fetch(url, {
       method: 'GET',
@@ -25,8 +25,14 @@ export const useImageSearch = (apiKey: string) => {
     if (!response.ok) throw new Error(`Unsplash Error: ${response.status}`);
 
     const data = await response.json();
+    
     if (data.results && data.results.length > 0) {
-      return data.results[0].urls.regular;
+      // 【⭐ 修改點：隨機選圖】
+      // 不要總是拿第 0 張，而是從回傳的結果中隨機挑一張
+      const randomIndex = Math.floor(Math.random() * data.results.length);
+      const randomImage = data.results[randomIndex];
+      
+      return randomImage.urls.regular;
     }
     return null;
   };
