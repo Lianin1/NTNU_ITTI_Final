@@ -21,9 +21,9 @@ import { useMenuSounds } from '@/hooks/useMenuSounds';
 // --- 遊戲設定 (類型和常數) ---
 type GameLength = 'short' | 'medium' | 'long';
 const TURN_MAP: Record<GameLength, number> = {
-  short: 2,
-  medium: 20,
-  long: 35,
+  short: 3,
+  medium: 35,
+  long: 50,
 };
 const API_KEY_STORAGE_KEY = '@gemini_api_key';
 const TOTAL_TALENT_POINTS = 20; 
@@ -231,7 +231,7 @@ export default function AppEntry() {
                   gameLength === len && styles.pressableTextSelected,
                 ]}
               >
-                {len === 'short' ? '短篇 (10)' : (len === 'medium' ? '中篇 (20)' : '長篇 (35)')}  
+                {len === 'short' ? '短篇 (20)' : (len === 'medium' ? '中篇 (35)' : '長篇 (50)')}  
               </Text>
             </Pressable>
           ))}

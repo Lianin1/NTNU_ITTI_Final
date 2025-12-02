@@ -1,4 +1,4 @@
-// hooks/useImageSearch.ts (已修復：加入找不到圖片時的備用機制)
+// hooks/useImageSearch.ts (已優化：移除黑白限制 + 強制風景風格)
 import { useState } from 'react';
 
 const API_ENDPOINT = 'https://api.unsplash.com/search/photos';
@@ -8,12 +8,14 @@ export const useImageSearch = (apiKey: string) => {
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
-  // 內部搜尋函式，可重複使用
   const performSearch = async (query: string): Promise<string | null> => {
-    // 強制黑白 + 高品質過濾
+    // 【⭐ 修改點 1】移除 &color=black_and_white
+    // 【⭐ 修改點 2】強制加上 'fantasy art landscape' 後綴，確保搜到的是場景
+    const enhancedQuery = `${query} fantasy art landscape atmospheric`;
+    
     const url = `${API_ENDPOINT}?query=${encodeURIComponent(
-      query
-    )}&per_page=1&orientation=landscape&color=black_and_white&content_filter=high`;
+      enhancedQuery
+    )}&per_page=1&orientation=landscape&content_filter=high`;
 
     const response = await fetch(url, {
       method: 'GET',
@@ -26,7 +28,7 @@ export const useImageSearch = (apiKey: string) => {
     if (data.results && data.results.length > 0) {
       return data.results[0].urls.regular;
     }
-    return null; // 沒找到
+    return null;
   };
 
   const searchImage = async (keyword: string) => {
@@ -40,17 +42,13 @@ export const useImageSearch = (apiKey: string) => {
     setImageUrl(null);
 
     try {
-      // 1. 嘗試使用 AI 給的關鍵字
       let url = await performSearch(keyword);
 
-      // 2. 【⭐ 修正點】如果找不到，使用備用關鍵字重試
       if (!url) {
         console.warn(`Unsplash 找不到 "${keyword}"，嘗試使用備用關鍵字...`);
-        // 使用一個很穩的通用關鍵字
-        url = await performSearch('fantasy mystery landscape mist'); 
+        url = await performSearch('mysterious ancient ruins fog'); 
       }
 
-      // 3. 設定圖片 (如果兩次都失敗，url 仍可能為 null，但機率極低)
       if (url) {
         setImageUrl(url);
       } else {
@@ -59,7 +57,7 @@ export const useImageSearch = (apiKey: string) => {
 
     } catch (e: any) {
       console.error('圖片搜尋失敗:', e);
-      setError('無法載入天機圖像'); // 給使用者看的友善訊息
+      setError('無法載入天機圖像');
     } finally {
       setIsLoading(false);
     }

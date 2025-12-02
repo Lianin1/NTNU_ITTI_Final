@@ -1,4 +1,4 @@
-// hooks/useGemini.ts (加強 ending_keyword 英文指令)
+// hooks/useGemini.ts (已優化：強制全中文輸出，禁止英文內容)
 import {
   Content,
   GenerationConfig,
@@ -28,7 +28,7 @@ export interface GameSettings {
   maxTurns: number;
 }
 
-// --- 2. 關鍵提示 ---
+// --- 2. 關鍵提示 (加入語言鐵律) ---
 const SYSTEM_PROMPT: Part = {
   text: `# 角色扮演 (Persona)
 你是一個文字冒險遊戲的「遊戲管理員 (GM)」。世界觀是「轉生修仙」。
@@ -40,7 +40,7 @@ const SYSTEM_PROMPT: Part = {
 
 你必須回傳的 JSON 結構如下：
 {
-  "scene_title": "當前場景名稱 (2-5 字)",
+  "scene_title": "場景名稱",
   "scene_tags": ["標籤1", "標籤2", "標籤3", "標籤4"], 
   "scene_description": "劇情描述...",
   "system_message": "系統提示...",
@@ -49,20 +49,21 @@ const SYSTEM_PROMPT: Part = {
   "ending_keyword": null
 }
 
-# 場景生成規則 (Scene Generation)
-1.  **動態變化**：根據劇情更新 scene_title 和 scene_tags。
-2.  **scene_tags**: 必須提供【正好 4 個】環境元素。
+# 語言鐵律 (Language Rules - CRITICAL)
+1.  **【全繁體中文】**：所有顯示給玩家看的欄位 (\`scene_title\`, \`scene_tags\`, \`scene_description\`, \`system_message\`, \`options\`) 必須嚴格使用【繁體中文】。
+2.  **【絕對禁止英文】**：在上述欄位中，絕不允許出現任何英文字母 (A-Z, a-z)。
+    - 錯誤範例："獲得 Spirit Stone"、"RootBone 提升"、"前往 Forest"
+    - 正確範例："獲得靈石"、"根骨提升"、"前往森林"
+3.  **【變數隱藏】**：不要顯示程式碼變數名 (如 rootBone, insight)。請轉化為自然語言，例如「你的根骨」、「你的悟性」。
+4.  **【例外】**：唯有 \`ending_keyword\` 欄位**必須**是英文 (用於搜尋圖片)。
 
-# 語言與敘事規則
-1.  **禁止程式碼洩漏**：禁止出現 rootBone 等變數名。
-2.  **自然語言轉換**：請用「根骨」、「悟性」等詞彙。
+# 場景生成規則
+1.  **動態變化**：根據劇情更新 scene_title 和 scene_tags。
+2.  **scene_tags**: 必須提供【正好 4 個】環境元素 (全中文)。
 
 # 遊戲流程規則
 1.  回合制：嚴格遵守 \`max_turns\`。
-2.  【結局】：當回合結束時，\`game_state\` 設為 "ended"。
-    - **重要**：必須提供 \`ending_keyword\`。
-    - **關鍵字規則**：【必須是英文 (English Only)】！絕對不要給中文。例如："mysterious mountains", "dark ruins", "ancient sword"。
-
+2.  結局：回合結束時，\`game_state\` 設為 "ended"，並提供 \`ending_keyword\`。
 3.  屬性影響：請在劇情中體現玩家屬性的影響。
 
 # 初始任務
@@ -148,8 +149,6 @@ export const useGemini = (apiKey: string) => {
            parsedData.options = []; 
         }
         
-        // 【修正點】如果 AI 沒給，或者 AI 給了中文(包含非ASCII字元)，就用備用字
-        // 這裡簡單判斷：如果為空，就給預設值。更複雜的判斷交給 useImageSearch 的 fallback
         if (!parsedData.ending_keyword) {
           parsedData.ending_keyword = 'fantasy landscape abstract';
         }
