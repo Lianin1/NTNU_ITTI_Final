@@ -1,7 +1,8 @@
-// app/(tabs)/index.tsx (已更新：加入繼續仙途按鈕)
+// app/(tabs)/index.tsx (最終整合版)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import {
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -9,7 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
 } from 'react-native';
 
 import GameLoop from '@/components/GameLoop';
@@ -20,7 +21,7 @@ import { useMenuSounds } from '@/hooks/useMenuSounds';
 
 type GameLength = 'short' | 'medium' | 'long';
 const TURN_MAP: Record<GameLength, number> = {
-  short: 2,
+  short: 10, // 記得改回 10
   medium: 20,
   long: 35,
 };
@@ -67,7 +68,6 @@ export default function AppEntry() {
     sendChoice,
     currentTurn,
     maxTurns,
-    // 【⭐ 新增：接收存檔狀態】
     hasSave,
     continueGame,
   } = useGemini(apiKey);
@@ -148,7 +148,6 @@ export default function AppEntry() {
     await startGame(gameSettings);
   };
 
-  // 【⭐ 新增：繼續遊戲處理函式】
   const handleContinue = async () => {
     playButton3();
     if (!apiKey.trim()) {
@@ -297,12 +296,12 @@ export default function AppEntry() {
           </Text>
         </View>
 
-        {/* 【⭐ 新增：繼續遊戲按鈕 (如果有存檔)】 */}
+        {/* 繼續遊戲按鈕 */}
         {hasSave && (
           <Pressable
             onPress={handleContinue}
             style={({ pressed }) => [
-              styles.continueButton, // 使用新樣式
+              styles.continueButton,
               pressed && { opacity: 0.8 },
             ]}
           >
@@ -326,7 +325,7 @@ export default function AppEntry() {
             styles.startButtonText,
             remainingPoints !== 0 && styles.startButtonTextDisabled
           ]}>
-            {hasSave ? "放棄並重新開始" : "開始轉生"} {/* 文字隨狀態改變 */}
+            {hasSave ? "放棄並重新開始" : "開始轉生"}
           </Text>
         </Pressable>
 
@@ -335,7 +334,7 @@ export default function AppEntry() {
   );
 }
 
-// ... TalentRow (保持不變) ...
+// --- 輔助元件：天賦點分配行 (包含滾輪支援) ---
 interface TalentRowProps {
   label: string;
   value: number;
@@ -357,8 +356,30 @@ const TalentRow = ({
   decrementDisabled,
   isActive
 }: TalentRowProps) => {
+
+  // 處理滾輪事件
+  const handleWheel = (e: any) => {
+    if (Platform.OS === 'web') {
+      try { e.preventDefault(); } catch(err) {}
+
+      if (e.deltaY < 0) {
+        if (!incrementDisabled) {
+          onIncrement();
+        }
+      } else if (e.deltaY > 0) {
+        if (!decrementDisabled) {
+          onDecrement();
+        }
+      }
+    }
+  };
+
   return (
-    <View style={[styles.talentRow, isActive && styles.talentRowActive]}>
+    <View 
+      style={[styles.talentRow, isActive && styles.talentRowActive]}
+      // @ts-ignore
+      onWheel={handleWheel}
+    >
       <Pressable onPress={onLabelPress}>
         <Text style={[styles.talentLabel, isActive && styles.talentLabelActive]}>
           {label}
@@ -386,9 +407,8 @@ const TalentRow = ({
   );
 };
 
-// --- 樣式表 (新增了 continueButton) ---
+// --- 樣式表 ---
 const styles = StyleSheet.create({
-  // ... (保留所有舊樣式)
   container: {
     flex: 1,
     backgroundColor: '#000',
@@ -447,27 +467,26 @@ const styles = StyleSheet.create({
     width: '90%',
   },
   
-  // 【新樣式】繼續按鈕
   continueButton: {
-    marginTop: 30, // 與上方說明框的距離
-    backgroundColor: '#000', // 黑底
+    marginTop: 30, 
+    backgroundColor: '#000', 
     borderRadius: 5,
     paddingVertical: 12,
     paddingHorizontal: 30,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#00FFFF', // 青色邊框，突顯重要性
-    marginBottom: 10, // 與開始按鈕的距離
+    borderColor: '#00FFFF', 
+    marginBottom: 10, 
   },
   continueButtonText: {
-    color: '#00FFFF', // 青色文字
+    color: '#00FFFF', 
     fontSize: 18,
     fontWeight: 'bold',
     fontFamily: 'NotoSerifTC_700Bold',
   },
 
   startButton: {
-    marginTop: 10, // 縮小間距
+    marginTop: 10,
     backgroundColor: '#FFF',
     borderRadius: 5,
     paddingVertical: 12,
